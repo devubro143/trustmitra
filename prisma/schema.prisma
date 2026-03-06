@@ -1,0 +1,321 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  WORKER
+  ADMIN
+}
+
+enum WorkerLevel {
+  NEW
+  VERIFIED
+  RATED
+  TRUSTED
+  PRO
+}
+
+enum BookingStatus {
+  PENDING
+  ASSIGNED
+  ARRIVED
+  OTP_VERIFIED
+  IN_PROGRESS
+  COMPLETED
+  DISPUTED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  HELD
+  RELEASED
+  REFUNDED
+  FAILED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum OtpPurpose {
+  LOGIN
+  BOOKING_START
+}
+
+enum TicketType {
+  QUALITY_ISSUE
+  PAYMENT_ISSUE
+  CUSTOMER_NO_SHOW
+  WORKER_NO_SHOW
+  REWORK_REQUEST
+  PRICING_DISPUTE
+}
+
+enum TicketStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum NotificationChannel {
+  APP
+  SMS
+  WHATSAPP
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id           String              @id @default(cuid())
+  name         String
+  phone        String              @unique
+  role         UserRole
+  city         String
+  createdAt    DateTime            @default(now())
+  sessions     AuthSession[]
+  otpCodes     OtpCode[]
+  worker       Worker?
+  customer     Customer?
+  reviewsGiven Review[]            @relation("reviewer")
+  tickets      SupportTicket[]     @relation("ticketCreator")
+  notifications NotificationEvent[]
+}
+
+model Customer {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  address     String
+  trustScore  Int       @default(72)
+  user        User      @relation(fields: [userId], references: [id])
+  bookings    Booking[]
+}
+
+model Worker {
+  id                String               @id @default(cuid())
+  userId            String               @unique
+  bio               String?
+  level             WorkerLevel          @default(NEW)
+  identityStatus    VerificationStatus   @default(PENDING)
+  skillStatus       VerificationStatus   @default(PENDING)
+  onTimeScore       Int                  @default(80)
+  completionRate    Int                  @default(80)
+  trustScore        Int                  @default(65)
+  totalJobs         Int                  @default(0)
+  repeatCustomerPct Int                  @default(0)
+  cancellationRate  Int                  @default(0)
+  complaintRate     Int                  @default(0)
+  availability      String               @default("9 AM - 7 PM")
+  area              String
+  user              User                 @relation(fields: [userId], references: [id])
+  skills            WorkerSkill[]
+  bookings          Booking[]
+  applications      WorkerApplication[]
+}
+
+model ServiceCategory {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  slug        String       @unique
+  description String
+  icon        String
+  services    Service[]
+}
+
+model Service {
+  id                  String           @id @default(cuid())
+  categoryId          String
+  name                String
+  slug                String           @unique
+  description         String
+  expectedDurationMin Int
+  basePrice           Int
+  maxPrice            Int
+  complexity          Int
+  completionProof     String
+  category            ServiceCategory  @relation(fields: [categoryId], references: [id])
+  bookings            Booking[]
+  workerSkills        WorkerSkill[]
+  applications        WorkerApplicationSkill[]
+}
+
+model WorkerSkill {
+  id          String  @id @default(cuid())
+  workerId    String
+  serviceId   String
+  approved    Boolean @default(false)
+  experienceY Int     @default(1)
+  worker      Worker  @relation(fields: [workerId], references: [id])
+  service     Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([workerId, serviceId])
+}
+
+model Booking {
+  id                  String             @id @default(cuid())
+  serviceId           String
+  customerId          String
+  workerId            String?
+  issue               String
+  address             String
+  preferredTime       DateTime
+  notes               String?
+  issuePhotoUrl       String?
+  estimatedAmount     Int
+  finalAmount         Int?
+  otpCode             String
+  otpVerifiedAt       DateTime?
+  status              BookingStatus      @default(PENDING)
+  customerConfirmed   Boolean            @default(false)
+  completionNote      String?
+  completionPhotoUrl  String?
+  reworkEligibleUntil DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  service             Service            @relation(fields: [serviceId], references: [id])
+  customer            Customer           @relation(fields: [customerId], references: [id])
+  worker              Worker?            @relation(fields: [workerId], references: [id])
+  payment             Payment?
+  statusLogs          BookingStatusLog[]
+  reviews             Review[]
+  tickets             SupportTicket[]
+  notifications       NotificationEvent[]
+}
+
+model BookingStatusLog {
+  id        String        @id @default(cuid())
+  bookingId String
+  status    BookingStatus
+  note      String?
+  createdAt DateTime      @default(now())
+  booking   Booking       @relation(fields: [bookingId], references: [id])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  bookingId       String        @unique
+  amountHeld      Int
+  platformFee     Int
+  workerPayout    Int
+  provider        String        @default("mock")
+  providerOrderId String?
+  status          PaymentStatus @default(HELD)
+  releaseDueAt    DateTime?
+  createdAt       DateTime      @default(now())
+  booking         Booking       @relation(fields: [bookingId], references: [id])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  bookingId  String
+  reviewerId String
+  rating     Int
+  feedback   String
+  createdAt  DateTime @default(now())
+  booking    Booking  @relation(fields: [bookingId], references: [id])
+  reviewer   User     @relation("reviewer", fields: [reviewerId], references: [id])
+}
+
+model SupportTicket {
+  id          String        @id @default(cuid())
+  bookingId   String
+  createdById String
+  type        TicketType
+  status      TicketStatus  @default(OPEN)
+  title       String
+  description String
+  resolution  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  booking     Booking       @relation(fields: [bookingId], references: [id])
+  createdBy   User          @relation("ticketCreator", fields: [createdById], references: [id])
+}
+
+model WorkerApplication {
+  id             String                   @id @default(cuid())
+  name           String
+  idDocumentUrl  String?
+  sampleWorkUrl  String?
+  phone          String                   @unique
+  city           String
+  area           String
+  experienceY    Int
+  availability   String
+  bio            String
+  identityStatus VerificationStatus       @default(PENDING)
+  statusNote     String?
+  createdAt      DateTime                 @default(now())
+  workerId       String?
+  worker         Worker?                  @relation(fields: [workerId], references: [id])
+  skills         WorkerApplicationSkill[]
+}
+
+model WorkerApplicationSkill {
+  id             String            @id @default(cuid())
+  applicationId  String
+  serviceId      String
+  experienceY    Int               @default(1)
+  application    WorkerApplication @relation(fields: [applicationId], references: [id])
+  service        Service           @relation(fields: [serviceId], references: [id])
+
+  @@unique([applicationId, serviceId])
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model OtpCode {
+  id         String      @id @default(cuid())
+  userId     String
+  phone      String
+  purpose    OtpPurpose
+  code       String
+  verified   Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  expiresAt  DateTime
+  user       User        @relation(fields: [userId], references: [id])
+}
+
+model NotificationEvent {
+  id        String             @id @default(cuid())
+  bookingId String?
+  userId    String?
+  channel   NotificationChannel @default(APP)
+  template  String
+  message   String
+  status    NotificationStatus @default(PENDING)
+  createdAt DateTime           @default(now())
+  sentAt    DateTime?
+  booking   Booking?           @relation(fields: [bookingId], references: [id])
+  user      User?              @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorUserId String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   String?
+  createdAt  DateTime @default(now())
+}
